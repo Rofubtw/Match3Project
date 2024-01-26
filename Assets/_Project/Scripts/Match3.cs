@@ -18,15 +18,20 @@ namespace Match3
         [SerializeField] Candy candyPrefab;
         [SerializeField] CandyType[] candyTypes;
         [SerializeField] Ease ease = Ease.InQuad;
+        [SerializeField] GameObject explosion;
 
+        AudioManager audioManager;
+        InputReader inputReader;
+        
         GridSystem2D<GridObject<Candy>> grid;
 
-        InputReader inputReader;
         Vector2Int selectedCandyPos = Vector2Int.one * -1;
+        bool isClickable = true;
 
         void Awake()
         {
             inputReader = GetComponent<InputReader>();
+            audioManager = GetComponent<AudioManager>();
         }
 
         void Start()
@@ -64,11 +69,13 @@ namespace Match3
 
         void OnSelectCandy()
         {
+            if (!isClickable) return;
             // Perspective Camera
             // var selectedPos = inputReader.SelectedPosition;
             // var gridPos = grid.GetXY(Camera.main.ScreenToWorldPoint(new Vector3(selectedPos.x, selectedPos.y, 10)));
 
             // Orthographic Camera
+            
             var gridPos = grid.GetXY(Camera.main.ScreenToWorldPoint(inputReader.SelectedPosition));
 
             if (!IsValidPosition(gridPos) || IsEmptyPosition(gridPos)) return;
@@ -76,10 +83,12 @@ namespace Match3
             if (selectedCandyPos == gridPos)
             {
                 DeselectCandy();
+                audioManager.PlayDeselect();
             }
             else if (selectedCandyPos == Vector2Int.one * -1)
             {
                 SelectCandy(gridPos);
+                audioManager.PlayClick();
             }
             else
             {
@@ -90,9 +99,13 @@ namespace Match3
         IEnumerator RunGameLoop(Vector2Int gridPosA, Vector2Int gridPosB)
         {
             yield return StartCoroutine(SwapCandies(gridPosA, gridPosB));
+            DeselectCandy();
+            isClickable = false;
 
             // Matches?
             List<Vector2Int> matches = FindMatches();
+            
+            // TODO: Calculate Score
 
             // Make Candies explode
             yield return StartCoroutine(ExplodeCandies(matches));
@@ -102,11 +115,10 @@ namespace Match3
 
             // Fill Empty Spots
             yield return StartCoroutine(FillEmptySpots());
-
-            // Replace empty slot
-            DeselectCandy();
-
-            // Is Game over?
+            isClickable = true;
+            
+            // TODO: Check if game is over?
+            
             yield return null;
         }
 
@@ -119,7 +131,7 @@ namespace Match3
                     if (grid.GetValue(x, y) == null)
                     {
                         CreateCandy(x, y);
-                        // SFX play sound?
+                        audioManager.PlayPop();
                         yield return new WaitForSeconds(0.1f);
                     }
                 }
@@ -128,6 +140,7 @@ namespace Match3
 
         IEnumerator MakeCandiesFall()
         {
+            // TODO: Make this more efficient
             for (var x = 0; x < width; x++)
             {
                 for (var y = 0; y < height; y++)
@@ -144,7 +157,7 @@ namespace Match3
                                 candy.transform
                                     .DOLocalMove(grid.GetWorldPositionCenter(x, y), 0.5f)
                                     .SetEase(ease);
-                                // SFX play woosh sound
+                                audioManager.PlayWoosh();
                                 yield return new WaitForSeconds(0.1f);
                                 break;
                             }
@@ -156,21 +169,28 @@ namespace Match3
 
         IEnumerator ExplodeCandies(List<Vector2Int> matches)
         {
-            //SFX play sound
-
             foreach (var match in matches)
             {
                 var candy = grid.GetValue(match.x, match.y).GetValue();
                 grid.SetValue(match.x, match.y, null);
 
-                // ExplodeVFX(match);
-
+                ExplodeVFX(match);
+                audioManager.PlayPop();
+                
                 candy.transform.DOPunchScale(Vector3.one * 0.1f, 0.1f, 1, 0.5f);
 
                 yield return new WaitForSeconds(0.1f);
 
                 candy.DestroyCandy();
             }
+        }
+
+        void ExplodeVFX(Vector2Int match)
+        {
+            // TODO: Pool
+            var fx = Instantiate(explosion, transform);
+            fx.transform.position = grid.GetWorldPositionCenter(match.x, match.y);
+            Destroy(fx, 5f);
         }
 
         List<Vector2Int> FindMatches()
@@ -219,6 +239,15 @@ namespace Match3
                 }
             }
 
+            if (matches.Count == 0)
+            {
+                audioManager.PlayNoMatch();
+            }
+            else
+            {
+                audioManager.PlayMatch();
+            }
+
             return new List<Vector2Int>(matches);
         }
 
@@ -244,18 +273,6 @@ namespace Match3
         void DeselectCandy() => selectedCandyPos = new Vector2Int(-1, -1);
 
         void SelectCandy(Vector2Int gridPos) => selectedCandyPos = gridPos;
-
-
-        // Init Grid
-
-        // Read player input and swap gems
-
-        // Start coroutine:
-        // Swap animation
-        // Matches?
-        // Make Gems Explode
-        // Replace empty spot
-        // Is Game Over?
 
         bool IsValidPosition(Vector2Int gridPosition) => gridPosition.x >= 0 && gridPosition.x < width &&
                                                          gridPosition.y >= 0 && gridPosition.y < height;
